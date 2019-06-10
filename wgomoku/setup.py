@@ -10,7 +10,7 @@ setuptools.setup(
     description="Gomoku Heuristics",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/Project-Ellie/tutorials",
+    url="https://github.com/smurve/DeepGomoku",
     packages=setuptools.find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",

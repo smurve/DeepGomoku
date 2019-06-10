@@ -1,0 +1,91 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+    <title>Flask-SocketIO Test</title>
+
+    <script src={{ url_for('static', filename='js/canvas.js') }}></script>
+
+    <script src="//code.jquery.com/jquery-1.12.4.min.js" 
+            integrity="sha256-ZosEbRLbNQzLpnKIkEdrPv7lOy9C27hHQ+Xp8a4MxAQ=" 
+            crossorigin="anonymous"></script>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/socket.io/2.2.0/socket.io.js" 
+            integrity="sha256-yr4fRk/GU1ehYJPAs8P4JlTgu0Hdsp4ZKrx8bDEDC3I=" 
+            crossorigin="anonymous"></script>
+    
+    <script type="text/javascript" charset="utf-8">
+        $(document).ready(function() {
+            // Use a "/test" namespace.
+            // An application can open a connection on multiple namespaces, and
+            // Socket.IO will multiplex all those connections on a single
+            // physical channel. If you don't care about multiple channels, you
+            // can set the namespace to an empty string.
+            namespace = '/test';
+
+            width=$('input#board_size').val();
+            squares=Number($('input#board_squares').val());
+            $('div#canvas').append('<canvas width="'+width+'" height="'+width+'" id="board1"></canvas>');
+            console.log(squares)
+            
+            // The connection URL has the following format, relative to the current page:
+            //     http[s]://<domain>:<port>[/<namespace>]
+            var socket = io(namespace);
+
+            socket.on('connect', function() {
+                console.log('connected.')
+            });
+
+            // Board updates from the server: always create a new canvas
+            socket.on('update', function(message) {
+                width = message.board.size;
+                $('canvas#board1').remove();
+                $('div#canvas').append('<canvas width="'+width+'" height="'+width+'" id="board1"></canvas>');
+                var canvas = document.getElementById("board1");
+                addCanvasListener(canvas, socket, message.board);
+                draw_board(message.board, message.stones, canvas);
+            });
+            
+            $('form#board_size').submit(function(event) {
+                socket.emit('board_size', {
+                    size: $('input#board_size').val(),
+                    squares: Number($('input#board_squares').val())
+                });
+                return false;
+            });
+
+            var canvas = document.getElementById("board1");
+            console.log(squares)
+            board={'size': width, 'squares': squares}
+            draw_board(board, [], canvas);
+            
+            addCanvasListener(canvas, socket, board);
+        });
+        
+        function addCanvasListener(canvas, socket, board){
+            canvas.addEventListener("mousedown", function(event){
+                canvas_x = event.clientX - canvas.offsetLeft;
+                canvas_y = event.clientY - canvas.offsetTop;
+                socket.emit('my_response', {'x': canvas_x, 'y': canvas_y});
+                step = board.size/ (board.squares+2)
+                x = Math.floor(canvas_x/step); 
+                y = board.squares - Math.floor((canvas_y)/step) + 1;
+                socket.emit('move', {'board': board, 'x': x, 'y': y});
+            }, false);
+            
+        }
+    </script>
+
+</head>
+<body>
+    <h1>Gomoku Game Broker</h1>
+
+    <form id="board_size" method="POST" action='#'>
+        <input type="number" name="board_size" id="board_size" placeholder="board size" value="600">
+        <input type="number" name="board_squares" id="board_squares" placeholder="number of squares" value="19">
+        <input type="submit" value="Set Board Parameters">
+    </form>
+    <hr/>
+    
+    <div id="canvas"></div>
+
+</body>
+</html>

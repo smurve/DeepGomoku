@@ -3,5 +3,5 @@
 venv
 logs
 mlruns/
-venv3
+venv
 __pycache__
