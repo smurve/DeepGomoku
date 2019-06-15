@@ -137,18 +137,23 @@ def create_samples_and_qvalues(board, policy, heuristics):
     samples = []
     qvalues = []
     avalues = []
+    distris = []
     for stones_t in all_stones_t:
         sample = create_sample(stones_t, board.N, 1-board.current_color)
         board = GomokuBoard(heuristics, board.N, stones=stones_t)
         qvalue, default_value = heuristic_QF(board, policy)
         qvalue = wrap_sample(qvalue, default_value)
+        distri = policy.probas(board, 2)
+        distri = wrap_sample(distri, 0)
         samples.append(sample)
         qvalues.append(qvalue)
+        distris.append(distri)
         avalues.append((qvalue-default_value)/100.0)
 
     return (np.array(samples), 
             np.reshape(qvalues, [8, board.N+2, board.N+2, 1]), 
-            np.reshape(avalues, [8, board.N+2, board.N+2, 1]))
+            np.reshape(avalues, [8, board.N+2, board.N+2, 1]),
+            np.reshape(distris, [8, board.N+2, board.N+2, 1]))
 
 
 def data_from_game(board, policy, heuristics):    
@@ -167,15 +172,15 @@ def data_from_game(board, policy, heuristics):
         a = np.concatenate((a,a1))
     return s,q,a
 
-def to_matrix12(sample):
-    field = np.rollaxis(sample.reshape(22,22,2), 2, 0).astype(np.int)
+def to_matrix12(sample, size=22):
+    field = np.rollaxis(sample.reshape(size,size,2), 2, 0).astype(np.int)
     unwrapped = (field[0]+field[1]*2)[1:-1].T[1:-1].T
     return unwrapped
 
-def to_matrix_xo(sample):
-    if np.sum(to_matrix12(sample)>0) % 2 == 0:
+def to_matrix_xo(sample, size=22):
+    if np.sum(to_matrix12(sample, size)>0) % 2 == 0:
         symbols = ['. ', 'x ', 'o ']
     else:
         symbols = ['. ', 'o ', 'x ']
-    im12 = to_matrix12(sample)
-    return "\n".join(["".join([symbols[c] for c in im12[r]]) for r in range(20) ])
+    im12 = to_matrix12(sample, size)
+    return "\n".join(["".join([symbols[c] for c in im12[r]]) for r in range(size-2) ])
