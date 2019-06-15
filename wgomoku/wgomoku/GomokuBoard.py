@@ -136,7 +136,13 @@ class GomokuBoard(GomokuField):
             
     
         
-    def display(self, viewpoint=None):
+    def display(self, viewpoint=None, probas=None):
+        """
+        displays the board as a plotly widget
+        viewpoint: only if policy=None: 0 for black, 1 for white.
+        probas: a function that takes a board and
+                returns an array of move probabilities.
+        """
         size=self.N
         if viewpoint=='current':
             viewpoint=self.current_color
@@ -156,9 +162,11 @@ class GomokuBoard(GomokuField):
         if self.cursor >= 0:
             self.display_stones(self.stones, axis)
 
-        if viewpoint is not None:
-            self.display_scores(axis, viewpoint)
-
+        if probas is None:
+            if viewpoint is not None:
+                self.display_scores(axis, viewpoint)
+        else:
+            self.display_probas(axis, probas(self))
         
     def display_helpers(self, axis):
         if self.N == 15:
@@ -207,8 +215,23 @@ class GomokuBoard(GomokuField):
                     defensive = self.scores[1-viewpoint][r][c]
                     color = self.color_for(offensive, defensive)
                     if offensive >= 1.5 or defensive >= 1.5:
-                        axis.scatter([x],[y], color=color, s=self.stones_size()/4.0, zorder=10)
+                        axis.scatter([x],[y], color=color, 
+                                     s=self.stones_size()/4.0, zorder=10)
             
+    def display_probas(self, axis, probas):
+        
+        probas = probas / np.max(probas)
+        colors = ['#F0F0F0', '#FFC0C0', '#FF9090', '#FF6060', '#FF0000']
+        for c in range(self.N):
+            for r in range(self.N):
+                x,y=GomokuTools.m2b((r,c), self.N)
+                if (x,y) not in self.stones[:self.cursor+1]:
+                    proba = probas[r][c]
+                    color = colors[int(proba*4.9)]
+                    if proba > 0.1:
+                        axis.scatter([x],[y], color=color, 
+                                     s=self.stones_size()/4.0, zorder=10)
+        
                 
     def stones_size(self):
         return 120 / self.N * self.disp_width**2
@@ -217,6 +240,28 @@ class GomokuBoard(GomokuField):
     def save(self, filename):
         df = pd.DataFrame(self.stones)
         df.to_csv(filename, header=None, index=None)
+
+
+    def game_state(self, compute_scores=False):
+        """
+        returns 1, if the party to move can create a 5 with the next move;
+        returns -1, if the party to move faces two open 4s and the above doesn't hold;
+        returns 1, if the party to move can create a double-open 4;
+        return 0, otherwise.
+        """
+        to_play = 1 - self.current_color
+        if compute_scores:
+            self.compute_all_scores()
+        scores = self.get_clean_scores()
+        
+        if (scores[to_play]>7.0).any():
+            return 1
+        elif np.sum(scores[1-to_play]>7.0) > 1:
+            return -1
+        elif (scores[to_play]==7.0).any():
+            return 1
+        else: 
+            return 0    
 
         
     def get_value(self, compute_scores=False):

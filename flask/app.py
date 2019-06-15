@@ -57,9 +57,9 @@ def test_connect():
     session['board'] = {'size': 600, 'squares': 19}
     h = Heuristics(kappa=3.0)
     session['gomokuBoard'] = GomokuBoard(h, N=19, disp_width=10, stones=[(10, 10),(11, 11),(9, 11),(11, 9)])
-    session['adversary'] = HeuristicGomokuPolicy(style = 1, bias=2.0, topn=5, threat_search=ThreatSearch(3,3))
+    session['adversary'] = HeuristicGomokuPolicy(style = 2, bias=2.0, topn=5, threat_search=ThreatSearch(4,4))
     emit('update', {'board': session['board'], 'stones': session['stones']})
 
 
 if __name__ == '__main__':
-    socketio.run(app, debug=True)
+    socketio.run(app, debug=True, host='0.0.0.0')

@@ -72,6 +72,7 @@ class HeuristicGomokuPolicy:
         bpos = gt.m2b(mpos, board.N)
         return (bpos[0], bpos[1], 
             board.scores[viewpoint][mpos[0]][mpos[1]])
+      
     
     def most_critical_pos(self, board, consider_threat_sequences=True):
         "If this function returns not None, take the move or die."
@@ -164,6 +165,42 @@ class HeuristicGomokuPolicy:
         else:
             choices = self.suggest_from_best_value(board, topn, style, bias).choices
             return {(gt.m2b(c[1], board.N)[0], gt.m2b(c[1], board.N)[1]): c[2] for c in choices}
+       
+    def probas (self, board, style):
+        """    
+        Returns the (suggested) probabilities for a move to be taken.
+        In case, masks all but the positions belonging to the most critical category. 
+        Params:
+        board: a gomoku board.
+        style: 0=aggressive, 1=defensive, 2=mixed
+        In non-critical situations, style = 0 looks at offensive options only,
+        style = 1 looks at defensive options only and style = 2 considers both aspects
+        equally.
+        """
+        scores = board.get_clean_scores()
+        to_move = 1 - board.current_color
+        o = scores[to_move]
+        d = scores[1 - to_move]
+
+        criticals = [lambda: o > 7.0, lambda: d > 7.0,
+                     lambda: o == 7.0, lambda: d == 7.0,
+                     lambda: o == 6.9, lambda: d == 6.9]
+
+        for crit in criticals:
+            field = crit()
+            if field.any():
+                return field / field.sum()
+
+        if style == 0:
+            noncrit = scores[to_move]
+        elif style == 1:
+            noncrit = scores[1-to_move]
+        elif style == 2: 
+            noncrit = scores[to_move] + scores[1-to_move] 
+
+        exp = np.exp(noncrit)
+        return np.floor( exp / exp.sum() * 1000 ) / 1000
+                   
         
     def value(self, board):
         """
