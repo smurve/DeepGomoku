@@ -12,3 +12,4 @@ pandas-gbq
 google_compute_engine
 mlflow
 jupyterlab
+tensorflow-estimator

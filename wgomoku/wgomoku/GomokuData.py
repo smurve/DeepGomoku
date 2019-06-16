@@ -163,14 +163,15 @@ def data_from_game(board, policy, heuristics):
     # Don't want to see fours (my heuristics don't work well when the game is essentially done anyway.)
     board.undo(False).undo(False)
 
-    s,q,a = create_samples_and_qvalues(board, policy, heuristics)
+    s,q,a,d = create_samples_and_qvalues(board, policy, heuristics)
     while board.cursor > 6:
         board.undo()
-        s1, q1, a1 = create_samples_and_qvalues(board, policy, heuristics)
+        s1, q1, a1, d1 = create_samples_and_qvalues(board, policy, heuristics)
         s = np.concatenate((s,s1))
         q = np.concatenate((q,q1))
         a = np.concatenate((a,a1))
-    return s,q,a
+        d = np.concatenate((d,d1))
+    return s,q,a,d
 
 def to_matrix12(sample, size=22):
     field = np.rollaxis(sample.reshape(size,size,2), 2, 0).astype(np.int)
