@@ -1,7 +1,7 @@
 import numpy as np
 from .GomokuTools import GomokuTools as gt
 from .GomokuBoard import GomokuBoard
-from .HeuristicPolicy import HeuristicGomokuPolicy
+from .HeuristicPolicy import HeuristicGomokuPolicy, StochasticMaxSampler
 from .QFunction import heuristic_QF
 
 BLACK=0
@@ -185,3 +185,57 @@ def to_matrix_xo(sample, size=22):
         symbols = ['. ', 'o ', 'x ']
     im12 = to_matrix12(sample, size)
     return "\n".join(["".join([symbols[c] for c in im12[r]]) for r in range(size-2) ])
+
+
+class ValueTracker:
+    def __init__(self, policy):
+        self.reg={}
+        self.p = policy
+
+    def register(self, board, value=0):
+        """
+        register a particular board and its value
+        """
+        size_before = len(self.reg)
+        value = value or (board.game_state() or self.is_determined(board))
+        if value != 0:
+            stones = board.stones
+            string = gt.stones_to_string(stones)
+            sample = create_sample(stones, board.N, 1-board.current_color)
+            h = hash(to_matrix12(sample, size=board.N+2).tostring())
+            self.reg[h] = [value, string] 
+            
+        return len(self.reg) - size_before
+        
+    def is_determined(self, board):
+        enum = np.ndenumerate(self.p.probas(board=board, style=2))
+        sampler = StochasticMaxSampler(enum, topn=10)
+        choices = [ gt.m2b((x,y),board.N) for _, (x,y), prob, _ in sampler.choices]
+        states = []
+        for x,y in choices:
+            board.set(x,y)
+            if self.fwd_value(board) != 0:
+                states.append(self.fwd_value(board))
+            else:
+                states.append(board.game_state())
+                if board.game_state():
+                    self.register(board, board.game_state())
+            board.undo(True)
+        if (np.array(states) == 1).all():
+            return -1
+        elif (np.array(states) == -1).all():
+            return 1
+        else:
+            return 0
+
+    def fwd_value(self, board):
+        """
+        return the forward value if the board is already registered, 0 otherwise.
+        """
+        stones = board.stones
+        sample = create_sample(stones, board.N, 1-board.current_color)
+        h = hash(to_matrix12(sample, size=board.N+2).tostring())
+        return self.reg.get(h, (0, ""))[0]
+        
+    def __repr__(self):
+        return str(list(self.reg.values()))
