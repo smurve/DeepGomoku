@@ -1,3 +1,4 @@
+from copy import deepcopy
 import numpy as np
 from .GomokuTools import GomokuTools as gt
 from .GomokuBoard import GomokuBoard
@@ -191,6 +192,12 @@ class ValueTracker:
     def __init__(self, policy):
         self.reg={}
         self.p = policy
+
+    def reg_variants(self, board, value=0):
+        board = deepcopy(board)
+        while self.register(board, value):
+            value = 0
+            board.undo()
 
     def register(self, board, value=0):
         """

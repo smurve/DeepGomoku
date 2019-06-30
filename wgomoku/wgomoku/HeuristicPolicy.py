@@ -317,7 +317,58 @@ def least_significant_move(board):
     return pos
 
 
+class Node:
+    def __init__(self, move, value, children=None, parent=None):
+        self.move = move
+        self.value = value
+        self.children = children or []
+        self.parent = parent
+       
+    @staticmethod
+    def from_list(l, parent=None):
+        if len(l) == 1:
+            root = Node(l[0], 0, children=[], parent = parent)
+            return root
 
+        else:
+            node = Node(l[0], 0, children=[Node.from_list(l[1:])])
+            node.children[0].parent = node
+            return node
+        
+    def add_child(self, move, value, children = []):
+        child = Node(move, value, children, self)
+        self.children.append(child)
+        return child
+                
+    def trajectory(self):
+        parent = self
+        t=[]
+        while parent:
+            t.append(parent.move)
+            parent = parent.parent
+        return t[::-1]
+    
+    def select(self, predicate):
+
+        #print("before:", self, self.children)
+        self.children = [child for child in self.children if child.select(predicate)]
+        #print("after: ", self, self.children)
+ 
+        return predicate(self) or len(self.children) > 0
+            
+ 
+    def all_trajectories(self):        
+        if len(self.children) == 0:
+            return [(self.trajectory(), self.value)]
+        else:
+            res = []
+            for child in self.children:
+                res += child.all_trajectories()
+            return res
+            
+    
+    def __repr__(self):
+        return str(self.move)
 
 class ThreatSearch():
     
@@ -343,10 +394,14 @@ class ThreatSearch():
         # Need a new policy on the copy.
         policy = HeuristicGomokuPolicy(style=0, bias=1.0, topn=5, threat_search=self)
 
-        return self._is_tseq_won(board, policy, max_depth, max_width, [])
+        tree = Node.from_list(board.stones)
+        while tree.children:
+            tree = tree.children[0]
+
+        return self._is_tseq_won(board, policy, max_depth, max_width, [], tree), tree
 
     
-    def _is_tseq_won(self, board, policy, max_depth, max_width, moves):
+    def _is_tseq_won(self, board, policy, max_depth, max_width, moves, root):
 
         if max_depth < 1:
             return moves, False
@@ -363,7 +418,8 @@ class ThreatSearch():
         sampler = policy.suggest_from_score(board, max_width, 0, 2.0)
         for c in sampler.choices:
             #print("checking move: " + str(c))
-            x,y = gt.m2b((c[1][0],c[1][1]), board.N)
+            x,y = gt.m2b((c[1][0],c[1][1]), board.N)            
+            threat = root.add_child((x,y), 0)
 
             if self.is_threat(board, policy, x,y):
                 board.set(x,y)
@@ -373,10 +429,6 @@ class ThreatSearch():
                 if defense0.status == -1: # The opponent gave up
                     return moves, True     
                 else: 
-                    #print(board.stones)
-                    #print("defense:" + str(defense0))
-                    #print(policy.defense_options(defense0.x, defense0.y))
-
                     branches = []
                     for defense in policy.defense_options(board, defense0.x, defense0.y):
                         # A single successful defense would make this branch useless
@@ -386,7 +438,8 @@ class ThreatSearch():
                         m = deepcopy(moves)
                         b.set(defense[0], defense[1])
                         m.append((defense[0], defense[1]))
-                        branches.append(self._is_tseq_won(b, p, max_depth-1, max_width, m))
+                        def_node = threat.add_child(defense, 0)                        
+                        branches.append(self._is_tseq_won(b, p, max_depth-1, max_width, m, def_node))
 
                     won = np.all([br[1] for br in branches])
 
@@ -394,6 +447,10 @@ class ThreatSearch():
                         board.undo()
                         moves = moves[:-1]
                     else:
+                        # The value after the final threatening stone is: lost
+                        threat.value = -1
+                        for d in threat.children:
+                            d.value = 1
                         # all branches are successful. Return any.
                         return branches[0]
 

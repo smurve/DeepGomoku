@@ -5,3 +5,4 @@ logs
 mlruns/
 venv
 __pycache__
+ipynb_tmp
