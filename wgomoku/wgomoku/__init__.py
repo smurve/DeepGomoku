@@ -10,5 +10,6 @@ from .GomokuData import (ValueTracker,
     wrap_sample, create_samples_and_qvalues, data_from_game,
     to_matrix12, to_matrix_xo)
 from .QFunction import heuristic_QF
+from .SampleDataHelper import SampleDataHelper
 
 

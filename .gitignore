@@ -6,3 +6,4 @@ mlruns/
 venv
 __pycache__
 ipynb_tmp
+tf2
