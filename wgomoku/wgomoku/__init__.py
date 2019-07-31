@@ -11,5 +11,5 @@ from .GomokuData import (ValueTracker,
     to_matrix12, to_matrix_xo)
 from .QFunction import heuristic_QF
 from .SampleDataHelper import SampleDataHelper
-
+from .TF2Tools import detect5
 
