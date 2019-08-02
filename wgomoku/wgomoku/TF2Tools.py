@@ -28,3 +28,12 @@ def detect5(stones):
     res = pool(detect(bw))
     return np.squeeze(tf.reduce_max(res, axis=-1).numpy())
     
+    
+def display_sample(sample):
+    """
+    displays any NxNx2 sample as overlay of 2 NxN matrices with the second channel multiplied by 2
+    """
+    if tf.is_tensor(sample):
+        sample = sample.numpy()
+    s = np.rollaxis(sample, -1, 0)
+    print(str(s[0]+2*s[1]))

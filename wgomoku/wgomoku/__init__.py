@@ -10,6 +10,8 @@ from .GomokuData import (ValueTracker,
     wrap_sample, create_samples_and_qvalues, data_from_game,
     to_matrix12, to_matrix_xo)
 from .QFunction import heuristic_QF
-from .SampleDataHelper import SampleDataHelper
-from .TF2Tools import detect5
+from .SampleDataHelper import (SampleDataHelper, new_policy_dataset, 
+                               analyse_and_recommend)
+from .TF2Tools import detect5, display_sample
 
+from .Networks import InceptionLayer, ResidualBlock, PolicyModel
