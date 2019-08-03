@@ -60,4 +60,25 @@ class PolicyModel(tf.keras.Model):
         dist = tf.keras.activations.softmax(self.call(inputs), axis=[1,2])
         return tf.reshape(dist, [N, N])
 
- 
+
+    
+class ValueModel(tf.keras.Model):
+    def __init__(self, board_size, n_blocks, n_layers, n_filters, activation):
+        super(ValueModel, self).__init__()
+        self.board_size=board_size
+        
+        self.blocks = [ResidualBlock(n_layers, n_filters, activation)
+                       for _ in range(n_blocks)]
+        
+        self.flat = tf.keras.layers.Flatten()
+        self.hidden1 = tf.keras.layers.Dense(units=256, activation='relu')
+        self.hidden2 = tf.keras.layers.Dense(units=64, activation='relu')
+        self.value_head = tf.keras.layers.Dense(units=1, activation='tanh')
+        
+    
+    def call(self, inputs):
+        N = self.board_size
+        x = tf.cast(inputs, dtype=tf.float32)
+        for block in self.blocks:
+            x = block(x)
+        return self.value_head(self.hidden2(self.hidden1(self.flat(x))))

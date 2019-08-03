@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
 from .GomokuTools import GomokuTools as gt
+from .TF2Tools import TerminalDetector
 
 class ValueDataHelper:
     def __init__(self, N, representation, edges=True, cut_off=None):
@@ -299,6 +300,30 @@ class SampleDataHelper (ValueDataHelper):
 
         return stones
 
+def new_value_dataset(file_pattern, gamma, sdh,
+                batch_size=256, num_epochs=1, buffer_size=500):
+    
+    games = tf.data.experimental.make_csv_dataset(
+        file_pattern = file_pattern,
+        column_names=["game", "winner"],
+        batch_size=1,
+        num_epochs=num_epochs
+    ) 
+    def _generator(): 
+        for batch in iter(games):
+            game = batch['game'][0].numpy().decode('ascii')
+            smp, lbl = sdh.from_string_with_bellmann(game, -1, gamma)
+            zipped = zip(smp, lbl)
+            for s_and_v in zipped:
+                yield s_and_v
+    
+    inputs = tf.data.Dataset.from_generator(
+        _generator, output_types=(tf.int32, tf.float32))
+    
+    inputs = inputs.shuffle(buffer_size).batch(batch_size)
+    return inputs
+    
+    
     
 def new_policy_dataset(file_pattern, sdh,
                 batch_size=256, num_epochs=1, buffer_size=500):
@@ -327,7 +352,7 @@ def new_policy_dataset(file_pattern, sdh,
     
     
     
-def analyse_and_recommend(smp, pi, n_best, N=19):
+def analyse_and_recommend(smp, pi, n_best, N=19, m2b="board"):
     """
     calculates the n_best best positions in board coordinates of smp, 
     looking at the sample and its policy result pi(smp)
@@ -337,6 +362,8 @@ def analyse_and_recommend(smp, pi, n_best, N=19):
     n_best: the n_best positions to return. Note that there may be further positions
     having pi match the worst of the best positions. We make a hard cut so that the
     number of returned positions is exactly n_best.
+    N: the board size
+    m2b: coord system to encode positions: either of "board", "original", or "padded"
     """
 
     # mask occupied positions
@@ -352,16 +379,129 @@ def analyse_and_recommend(smp, pi, n_best, N=19):
     
     distr = (1 - occupied) * pi
 
+    corr = 1 if m2b == "padded" else 0
+    
     max_likely = sorted(np.reshape(distr, [N*N]))[::-1][:n_best]
     yn = distr == max_likely[0]
     for i in range(1,n_best):
         yn = np.add(yn, distr == max_likely[i]) 
     r, c = np.where(yn)
     greedy_positions = [
-        (gt.m2b((rr,cc), N), distr[rr][cc])
+        (gt.m2b((rr,cc), N), distr[rr][cc]) if m2b == 'board' else (rr+corr, cc+corr)
         for rr, cc in zip(r,c)    
     ]
     
     return distr, greedy_positions[:n_best]
 
 
+class SelfPlay:
+    def __init__(self, policy, board_size):
+        self.board_size = board_size
+        self.td = TerminalDetector(board_size+2)
+        self.pi = policy
+        sdh = SampleDataHelper(board_size, representation='NxNx1B')
+        self.sdh = sdh
+        self.template = sdh.template()
+        
+
+    def create_episodes(self, n_episodes):
+        """
+        create a given number of episodes in padded-border representation.
+        All episodes are guaranteed to be terminated with value = -1.
+        This may take some time - since it requires a large number of policy evaluations.
+        n_episodes: Number of episodes to return. 
+        """
+        episodes = []
+        while len(episodes) < n_episodes:
+            game, traj, terminated = self.create_episode(
+                limit=50, n_choices=10, greedy_bias=300)
+            if terminated:
+                episodes.append(traj)
+        return episodes
+
+
+    def create_episode(self, limit, n_choices, greedy_bias, m2b='board'):
+        move_count = 0
+        terminated = False
+        game = self.template.copy()
+        game[10][10][0] = -1
+        traj = [np.array([10, 10])]
+        while move_count < limit and not terminated:
+            game, move = self.do_one_move(game, n_choices, 300, m2b)
+            traj.append(move)
+            terminated = (self.td.call(game) != 0).any()
+            move_count += 1
+        return game, traj, terminated
+
+    
+    def do_one_move(self, game, n_choices, greedy_bias, m2b):
+        game = game.copy()
+        pi = self.pi.dist(np.reshape(game, [1,21,21,2]))
+        _, choice = analyse_and_recommend(game, pi, n_choices, m2b=m2b)
+        weights = [greedy_bias*g[1] for g in choice]
+        weights = np.exp(weights)/np.sum(np.exp(weights))
+        draw = np.squeeze(np.random.choice(range(n_choices), p=weights, size=1))
+        move = choice[draw][0]
+        r, c = gt.b2m(move, self.board_size)+[1,1]
+        game[r][c][0] = 1
+        return 2 * self.template - game, move        
+        
+        
+class A2C_SampleGeneratorFactory:
+    
+    def __init__(self, board_size, value_model, gamma, cut_off=None):
+        """
+        gamma: discount factor
+        """
+        self.board_size = board_size
+        self.value_model = value_model
+        self.sdh = SampleDataHelper(board_size, representation='NxNx1B', cut_off=cut_off)
+        self.gamma = gamma
+    
+    def create_generator(self, episodes, kind):        
+        """
+        episodes: list of border-padded matrix coordinates (move sequences)
+        kind: 'values' or 'advantages' for the two different fitting phases of A2C
+        """
+        def _generator():
+            dataset = []
+            for episode in episodes:
+
+                # We compute the values once for all symmetries
+                samples, _ = self.sdh.traj_to_samples(episode, -1, self.gamma)
+                values = self.gamma * np.squeeze(
+                    self.value_model.call(samples).numpy())
+
+                # all games end with the one to move staring at a line of five.
+                values[-1] = -1.0
+                values[-2] = 1.0 # second-but-last: The winner's big chance
+
+                # Shift by 2: next position means 'next for the same player'
+                shifted = self.gamma * values[2:]
+                shifted = np.append(shifted, 1.)
+                shifted = np.append(shifted, -1.)
+                advantages = shifted - values
+
+                # Now zip it all up for each symmetric representation
+                all_syms = self.sdh.all_symmetries(episode)
+                for sym in all_syms:
+                    rep = []
+                    dataset.append(rep)
+                    samples, _ = self.sdh.traj_to_samples(sym, -1, self.gamma)
+
+                    if kind == 'values':
+                        labels = shifted
+                    elif kind == 'advantages':
+                        labels = advantages
+                    else: 
+                        raise ValueError("Kind '%s' not supported" % kind)
+
+                    for s_and_l in zip(samples, labels):
+                        rep.append(s_and_l)
+
+            # Return the generator on all representation within the dataset
+            for rep in dataset:
+                for sva in rep:
+                    yield sva
+    
+        return _generator

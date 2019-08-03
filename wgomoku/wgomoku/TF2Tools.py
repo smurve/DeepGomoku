@@ -37,3 +37,33 @@ def display_sample(sample):
         sample = sample.numpy()
     s = np.rollaxis(sample, -1, 0)
     print(str(s[0]+2*s[1]))
+    
+    
+class TerminalDetector():
+    """
+    Convnet to detect lines of five. Works for NxNx1B representation only.
+    """
+    def __init__(self, N):
+        self.N = N
+        hor=np.zeros([5,5], dtype=np.float16)
+        hor[2]=1.
+        diag=np.eye(5, dtype=np.float16)
+        filters = np.array([hor, hor.T, diag, diag[::-1]])
+        kernel_init = tf.constant_initializer(np.rollaxis(filters, 0, 3))
+        bias_init = tf.constant_initializer(-4.0)
+
+        self.conv = tf.keras.layers.Conv2D(
+            bias_initializer=bias_init, kernel_size=5,
+            activation='relu', filters=4, padding='same', 
+            kernel_initializer=kernel_init)
+        self.pool = tf.keras.layers.MaxPool2D(pool_size=self.N, strides=1)
+        
+    def call(self, game):
+        both = np.rollaxis(game, 2, 0)[0]
+        to_move = (both+1) // 2
+        other = (1-both) // 2
+        both_again = np.stack([to_move, other], axis=0)
+        both_again = np.reshape(both_again, [2, 21, 21, 1])        
+        both_again = tf.cast(both_again, dtype=tf.float32)
+        res = self.pool(self.conv(both_again))
+        return np.squeeze(tf.reduce_max(res, axis=-1).numpy())
