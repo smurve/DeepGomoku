@@ -9,7 +9,7 @@ class ValueDataHelper:
         Helper supporting various representations of a particular gomoku position
         params:
         N: board size
-        representation: either of "NxNx2", "NxNx1"
+        representation: either of "NxNx2", "NxNx1", "NxNx1B"
             "NxNx2" uses two matrices alternatingly, the player to move next always on the top matrix
             "NxNx1" uses a single matrix, the player to move always +1, the other -1
             "NxNx1B" uses one matrix for the players (like NxNx1) and a second for the border. 
@@ -232,7 +232,7 @@ class SampleDataHelper (ValueDataHelper):
             
         return all_samples, all_values
 
-    def traj_to_samples_with_actions(self, traj):
+    def traj_to_samples_with_actions(self, traj, sparse=False):
         """
         creates samples from a given trajectory, together with their actions
 
@@ -245,16 +245,18 @@ class SampleDataHelper (ValueDataHelper):
         to_move_first = 1
         for t in range(len(traj)-1):      
             moves = traj[:t+1]
-            next_move = traj[t+1]
+            r, c = traj[t+1]
             if self.rep == 'NxNx1B' or self.edges:
-                next_move -= [1, 1]
-            action = np.zeros([self.N, self.N], dtype=np.float32)
-            action[next_move[0]][next_move[1]] = 1.0
+                r-=1
+                c-=1
+            if sparse: 
+                # flattened coordinates
+                action = r * self.N + c
+            else:
+                action = np.zeros([self.N, self.N], dtype=np.float32)
+                action[next_move[0]][next_move[1]] = 1.0
+
             sample = self.create_sample(moves, to_move_first)
-            
-            # Hopefully, we won't need this
-            #occupied = np.abs(np.rollaxis(sample, 2, 0)[0].T[1:-1].T[1:-1])
-            #action -= occupied * .1
             
             samples.append(sample)
             actions.append(action)
@@ -381,13 +383,14 @@ def analyse_and_recommend(smp, pi, n_best, N=19, m2b="board"):
 
     corr = 1 if m2b == "padded" else 0
     
+    # Drawing from pi of dimensions NxN always comes as 'original' without padding
     max_likely = sorted(np.reshape(distr, [N*N]))[::-1][:n_best]
     yn = distr == max_likely[0]
     for i in range(1,n_best):
         yn = np.add(yn, distr == max_likely[i]) 
     r, c = np.where(yn)
     greedy_positions = [
-        (gt.m2b((rr,cc), N), distr[rr][cc]) if m2b == 'board' else (rr+corr, cc+corr)
+        (gt.m2b((rr,cc), N), distr[rr][cc]) if m2b == 'board' else ((rr+corr, cc+corr),  distr[rr][cc])
         for rr, cc in zip(r,c)    
     ]
     
@@ -395,39 +398,63 @@ def analyse_and_recommend(smp, pi, n_best, N=19, m2b="board"):
 
 
 class SelfPlay:
-    def __init__(self, policy, board_size):
+    def __init__(self, policy, board_size, start_with):
+        """
+        Params:
+        policy: the policy model
+        board_size: The side length of the board
+        start_with: a padded representation of a starting traj
+        """
         self.board_size = board_size
         self.td = TerminalDetector(board_size+2)
         self.pi = policy
-        sdh = SampleDataHelper(board_size, representation='NxNx1B')
-        self.sdh = sdh
-        self.template = sdh.template()
+        self.sdh = SampleDataHelper(board_size, representation='NxNx1B')
+        self.empty = self.sdh.template()
+        if start_with is not None:
+            self.start_traj = start_with
+            self.start = self.sdh.create_sample(start_with, 1)
+        else:
+            self.start_traj = [(10, 10)]
+            self.start = self.empty.copy()
+            self.start[10][10][0] = -1
+        
         
 
-    def create_episodes(self, n_episodes):
+    def create_episodes(self, n_episodes, m2b):
         """
-        create a given number of episodes in padded-border representation.
+        create a given number of episodes in the given coord system.
         All episodes are guaranteed to be terminated with value = -1.
         This may take some time - since it requires a large number of policy evaluations.
         n_episodes: Number of episodes to return. 
+        m2b: coord system to encode trajectories: either of "board", "original", or "padded"
         """
         episodes = []
         while len(episodes) < n_episodes:
             game, traj, terminated = self.create_episode(
-                limit=50, n_choices=10, greedy_bias=300)
+                limit=50, n_choices=10, greedy_bias=300, m2b=m2b)
             if terminated:
                 episodes.append(traj)
         return episodes
 
 
-    def create_episode(self, limit, n_choices, greedy_bias, m2b='board'):
+    def create_episode(self, limit, n_choices, greedy_bias, m2b):
+        """
+        Params:
+        m2b: coord system to encode traj: either of "board", "original", or "padded"
+        Returns: The final game state, the trajectory and a flag indicating termination.
+        """
         move_count = 0
         terminated = False
-        game = self.template.copy()
-        game[10][10][0] = -1
-        traj = [np.array([10, 10])]
+        game = self.start.copy()
+
+        traj = self.start_traj
+        if m2b == 'original':
+            traj = [(r-1, c-1) for (r,c) in traj]
+        elif m2b == 'board':
+            traj = [gt.m2b((r-1, c-1), self.board_size) for (r,c) in traj]
+
         while move_count < limit and not terminated:
-            game, move = self.do_one_move(game, n_choices, 300, m2b)
+            game, move = self.do_one_move(game, n_choices, greedy_bias, m2b)
             traj.append(move)
             terminated = (self.td.call(game) != 0).any()
             move_count += 1
@@ -437,14 +464,20 @@ class SelfPlay:
     def do_one_move(self, game, n_choices, greedy_bias, m2b):
         game = game.copy()
         pi = self.pi.dist(np.reshape(game, [1,21,21,2]))
-        _, choice = analyse_and_recommend(game, pi, n_choices, m2b=m2b)
+        _, choice = analyse_and_recommend(game, pi, n_choices, m2b='padded')
         weights = [greedy_bias*g[1] for g in choice]
         weights = np.exp(weights)/np.sum(np.exp(weights))
         draw = np.squeeze(np.random.choice(range(n_choices), p=weights, size=1))
         move = choice[draw][0]
-        r, c = gt.b2m(move, self.board_size)+[1,1]
+        r, c = np.array(move) 
         game[r][c][0] = 1
-        return 2 * self.template - game, move        
+
+        if m2b == 'original':
+            move = (r-1, c-1)
+        elif m2b == 'board':
+            move = gt.m2b((r-1, c-1), self.board_size)
+
+        return 2 * self.empty - game, move        
         
         
 class A2C_SampleGeneratorFactory:
@@ -467,8 +500,15 @@ class A2C_SampleGeneratorFactory:
             dataset = []
             for episode in episodes:
 
-                # We compute the values once for all symmetries
-                samples, _ = self.sdh.traj_to_samples(episode, -1, self.gamma)
+                # We compute the value targets once for all symmetries
+                if kind == 'values': 
+                    # bellmann values not needed here, we compute targets
+                    samples, _ = self.sdh.traj_to_samples(episode, -1, self.gamma)
+                elif kind == 'advantages':
+                    samples, actions = self.sdh.traj_to_samples_with_actions(episode, sparse=True)
+                else: 
+                    raise ValueError("Kind '%s' not supported" % kind)
+                    
                 values = self.gamma * np.squeeze(
                     self.value_model.call(samples).numpy())
 
@@ -490,14 +530,13 @@ class A2C_SampleGeneratorFactory:
                     samples, _ = self.sdh.traj_to_samples(sym, -1, self.gamma)
 
                     if kind == 'values':
-                        labels = shifted
-                    elif kind == 'advantages':
-                        labels = advantages
+                        for s_l in zip(samples, shifted):
+                            rep.append(s_l)
+                    elif kind == 'advantages': # need labels and weights!
+                        for s_l_w in zip(samples, actions, advantages):
+                            rep.append(s_l_w)
                     else: 
                         raise ValueError("Kind '%s' not supported" % kind)
-
-                    for s_and_l in zip(samples, labels):
-                        rep.append(s_and_l)
 
             # Return the generator on all representation within the dataset
             for rep in dataset:
