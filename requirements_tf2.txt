@@ -67,7 +67,7 @@ redis==3.2.1
 Send2Trash==1.5.0
 six==1.12.0
 tb-nightly==1.14.0a20190603
-tensorflow-gpu==2.0.0b1
+tensorflow-gpu==2.4.0
 termcolor==1.1.0
 terminado==0.8.2
 testpath==0.4.2
